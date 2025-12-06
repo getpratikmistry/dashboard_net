@@ -6,7 +6,10 @@
     };
 
     const cardUpdateHandles = new Map();
-    const updateIntervalMs = 5000;
+    const updateIntervalMs = 10000;
+    let connection;
+    let currentCriticalOnly = false;
+    const criticalStatuses = new Set(['Delayed', 'OffRoute']);
 
     function updateTextIfChanged($el, value) {
         const textValue = value ?? '';
@@ -18,29 +21,17 @@
     }
 
     function renderTimeline($container, stops) {
-        const existing = $container.find('.timeline-stop');
-        if (existing.length !== stops.length) {
-            $container.empty();
-            stops.forEach(stop => {
-                $container.append(buildStop(stop));
-            });
-            return;
-        }
-
-        existing.each(function (index) {
-            const stop = stops[index];
-            const $stop = $(this);
-            $stop.toggleClass('complete', !!stop.isComplete);
-            updateTextIfChanged($stop.find('.fw-semibold'), stop.name);
-            updateTextIfChanged($stop.find('.text-muted'), stop.arrivesAt);
-        });
+        $container.empty();
+        const fragment = $(document.createDocumentFragment());
+        stops.forEach(stop => fragment.append(buildStop(stop)));
+        $container.append(fragment);
     }
 
     function buildStop(stop) {
         return $(
             `<div class="timeline-stop ${stop.isComplete ? 'complete' : ''}">` +
             '  <div class="dot"></div>' +
-            '  <div>' +
+            '  <div class="timeline-label">' +
             `    <div class="fw-semibold">${stop.name}</div>` +
             `    <div class="small text-muted">${stop.arrivesAt}</div>` +
             '  </div>' +
@@ -149,6 +140,10 @@
         );
     }
 
+    function isCritical(trip) {
+        return criticalStatuses.has(trip.status);
+    }
+
     function renderCardContent($card, trip) {
         updateStatusBadge($card.find('[data-section="status"]'), trip.status);
         renderMeta($card.find('[data-section="meta"]'), trip);
@@ -178,45 +173,77 @@
         });
     }
 
-    function fetchTrips() {
+    function syncFilters() {
         const order = $('#orderSelect').val();
-        const critical = $('#criticalSwitch').is(':checked') ? 'critical' : 'all';
+        currentCriticalOnly = $('#criticalSwitch').is(':checked');
+        return {
+            order,
+            critical: currentCriticalOnly ? 'critical' : 'all'
+        };
+    }
+
+    function fetchTrips() {
+        const { order, critical } = syncFilters();
         return $.getJSON('/api/trips', { order, critical });
     }
 
-    function applyUpdate(trips) {
+    function applyUpdate(trips, { isFullList = false } = {}) {
         const cards = new Map();
         $('.trip-card').each(function () {
             cards.set($(this).data('trip-id'), $(this));
         });
 
-        let structureChanged = trips.length !== cards.size;
-        if (!structureChanged) {
-            for (const trip of trips) {
-                if (!cards.has(trip.id)) {
-                    structureChanged = true;
-                    break;
+        if (isFullList) {
+            let structureChanged = trips.length !== cards.size;
+            if (!structureChanged) {
+                for (const trip of trips) {
+                    if (!cards.has(trip.id)) {
+                        structureChanged = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (structureChanged) {
-            rebuildCards(trips);
-            return;
+            if (structureChanged) {
+                rebuildCards(trips);
+                return;
+            }
         }
 
         trips.forEach(trip => {
-            const $card = cards.get(trip.id);
-            if (!$card || cardUpdateHandles.has(trip.id)) {
+            let $card = cards.get(trip.id);
+            const isCriticalTrip = isCritical(trip);
+
+            if (currentCriticalOnly && !isCriticalTrip) {
+                if ($card) {
+                    $card.remove();
+                }
                 return;
             }
+
+            if (!$card && isFullList) {
+                return;
+            }
+
+            if (!$card) {
+                $card = buildCard(trip);
+                renderProbills($card.find('.probill-list'), trip.probills);
+                renderTimeline($card.find('[data-section="timeline"]'), trip.timeline);
+                $('#trip-grid').append($card);
+                attachHoverPause();
+            }
+
+            if (cardUpdateHandles.has(trip.id)) {
+                return;
+            }
+
             renderCardContent($card, trip);
         });
     }
 
     function scheduleUpdates() {
         setInterval(() => {
-            fetchTrips().done(applyUpdate);
+            fetchTrips().done(trips => applyUpdate(trips, { isFullList: true }));
         }, updateIntervalMs);
     }
 
@@ -226,12 +253,36 @@
         rebuildCards(trips);
     }
 
+    function connectSignalR() {
+        if (!window.signalR) {
+            return;
+        }
+
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl('/tripHub')
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on('TripsUpdated', (payload) => {
+            if (Array.isArray(payload)) {
+                applyUpdate(payload, { isFullList: false });
+            }
+        });
+
+        connection.start()
+            .catch(() => {
+                // keep silent, the polling loop will continue to work
+            });
+    }
+
     $(function () {
+        syncFilters();
         hydrateFromServer();
         scheduleUpdates();
+        connectSignalR();
 
         $('#orderSelect, #criticalSwitch').on('change', () => {
-            fetchTrips().done(applyUpdate);
+            fetchTrips().done(rebuildCards);
         });
     });
 }(jQuery));
