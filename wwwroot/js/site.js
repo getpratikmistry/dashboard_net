@@ -6,8 +6,10 @@
     };
 
     const cardUpdateHandles = new Map();
+    const updateIntervalMs = 10000;
     let connection;
-    const updateIntervalMs = 5000;
+    let currentCriticalOnly = false;
+    const criticalStatuses = new Set(['Delayed', 'OffRoute']);
 
     function updateTextIfChanged($el, value) {
         const textValue = value ?? '';
@@ -23,22 +25,6 @@
         const fragment = $(document.createDocumentFragment());
         stops.forEach(stop => fragment.append(buildStop(stop)));
         $container.append(fragment);
-        const existing = $container.find('.timeline-stop');
-        if (existing.length !== stops.length) {
-            $container.empty();
-            stops.forEach(stop => {
-                $container.append(buildStop(stop));
-            });
-            return;
-        }
-
-        existing.each(function (index) {
-            const stop = stops[index];
-            const $stop = $(this);
-            $stop.toggleClass('complete', !!stop.isComplete);
-            updateTextIfChanged($stop.find('.fw-semibold'), stop.name);
-            updateTextIfChanged($stop.find('.text-muted'), stop.arrivesAt);
-        });
     }
 
     function buildStop(stop) {
@@ -46,7 +32,6 @@
             `<div class="timeline-stop ${stop.isComplete ? 'complete' : ''}">` +
             '  <div class="dot"></div>' +
             '  <div class="timeline-label">' +
-            '  <div>' +
             `    <div class="fw-semibold">${stop.name}</div>` +
             `    <div class="small text-muted">${stop.arrivesAt}</div>` +
             '  </div>' +
@@ -155,6 +140,10 @@
         );
     }
 
+    function isCritical(trip) {
+        return criticalStatuses.has(trip.status);
+    }
+
     function renderCardContent($card, trip) {
         updateStatusBadge($card.find('[data-section="status"]'), trip.status);
         renderMeta($card.find('[data-section="meta"]'), trip);
@@ -184,14 +173,21 @@
         });
     }
 
-    function fetchTrips() {
+    function syncFilters() {
         const order = $('#orderSelect').val();
-        const critical = $('#criticalSwitch').is(':checked') ? 'critical' : 'all';
+        currentCriticalOnly = $('#criticalSwitch').is(':checked');
+        return {
+            order,
+            critical: currentCriticalOnly ? 'critical' : 'all'
+        };
+    }
+
+    function fetchTrips() {
+        const { order, critical } = syncFilters();
         return $.getJSON('/api/trips', { order, critical });
     }
 
     function applyUpdate(trips, { isFullList = false } = {}) {
-    function applyUpdate(trips) {
         const cards = new Map();
         $('.trip-card').each(function () {
             cards.set($(this).data('trip-id'), $(this));
@@ -216,6 +212,15 @@
 
         trips.forEach(trip => {
             let $card = cards.get(trip.id);
+            const isCriticalTrip = isCritical(trip);
+
+            if (currentCriticalOnly && !isCriticalTrip) {
+                if ($card) {
+                    $card.remove();
+                }
+                return;
+            }
+
             if (!$card && isFullList) {
                 return;
             }
@@ -232,26 +237,6 @@
                 return;
             }
 
-        let structureChanged = trips.length !== cards.size;
-        if (!structureChanged) {
-            for (const trip of trips) {
-                if (!cards.has(trip.id)) {
-                    structureChanged = true;
-                    break;
-                }
-            }
-        }
-
-        if (structureChanged) {
-            rebuildCards(trips);
-            return;
-        }
-
-        trips.forEach(trip => {
-            const $card = cards.get(trip.id);
-            if (!$card || cardUpdateHandles.has(trip.id)) {
-                return;
-            }
             renderCardContent($card, trip);
         });
     }
@@ -259,7 +244,6 @@
     function scheduleUpdates() {
         setInterval(() => {
             fetchTrips().done(trips => applyUpdate(trips, { isFullList: true }));
-            fetchTrips().done(applyUpdate);
         }, updateIntervalMs);
     }
 
@@ -292,18 +276,13 @@
     }
 
     $(function () {
+        syncFilters();
         hydrateFromServer();
         scheduleUpdates();
         connectSignalR();
 
         $('#orderSelect, #criticalSwitch').on('change', () => {
             fetchTrips().done(rebuildCards);
-    $(function () {
-        hydrateFromServer();
-        scheduleUpdates();
-
-        $('#orderSelect, #criticalSwitch').on('change', () => {
-            fetchTrips().done(applyUpdate);
         });
     });
 }(jQuery));

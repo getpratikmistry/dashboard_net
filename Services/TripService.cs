@@ -31,20 +31,6 @@ public class TripService
 
             return query.ToList();
         }
-        ApplyLiveMutations();
-
-        IEnumerable<Trip> query = _trips;
-
-        if (!string.IsNullOrWhiteSpace(criticalFilter) && criticalFilter != "all")
-        {
-            query = query.Where(t => t.Status == TripStatus.Delayed || t.Status == TripStatus.OffRoute);
-        }
-
-        query = order?.ToLowerInvariant() == "desc"
-            ? query.OrderByDescending(t => t.StartDate)
-            : query.OrderBy(t => t.StartDate);
-
-        return query.ToList();
     }
 
     public IEnumerable<object> GetTripSnapshots(string order = "asc", string? criticalFilter = null)
@@ -158,38 +144,6 @@ public class TripService
         }
 
         return changed;
-    private void ApplyLiveMutations()
-    {
-        foreach (var trip in _trips)
-        {
-            if (_random.NextDouble() < 0.15)
-            {
-                var statusRoll = _random.Next(0, 100);
-                trip.Status = statusRoll switch
-                {
-                    < 70 => TripStatus.OnTime,
-                    < 90 => TripStatus.Delayed,
-                    _ => TripStatus.OffRoute
-                };
-            }
-
-            if (_random.NextDouble() < 0.25)
-            {
-                var nextStop = trip.Timeline.FirstOrDefault(stop => !stop.IsComplete);
-                if (nextStop is not null)
-                {
-                    nextStop.IsComplete = true;
-                }
-            }
-
-            foreach (var probill in trip.Probills)
-            {
-                if (_random.NextDouble() < 0.2)
-                {
-                    probill.StopArrival = DateTime.UtcNow.AddMinutes(_random.Next(-120, 180));
-                }
-            }
-        }
     }
 
     private List<Trip> BuildSeedTrips()
