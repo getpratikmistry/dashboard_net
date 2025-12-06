@@ -7,7 +7,6 @@ public class TripService
 {
     private readonly List<Trip> _trips;
     private readonly Random _random = new();
-    private readonly object _sync = new();
 
     public TripService()
     {
@@ -16,55 +15,26 @@ public class TripService
 
     public IReadOnlyCollection<Trip> GetTrips(string order = "asc", string? criticalFilter = null)
     {
-        lock (_sync)
+        ApplyLiveMutations();
+
+        IEnumerable<Trip> query = _trips;
+
+        if (!string.IsNullOrWhiteSpace(criticalFilter) && criticalFilter != "all")
         {
-            IEnumerable<Trip> query = _trips;
-
-            if (!string.IsNullOrWhiteSpace(criticalFilter) && criticalFilter != "all")
-            {
-                query = query.Where(t => t.Status == TripStatus.Delayed || t.Status == TripStatus.OffRoute);
-            }
-
-            query = order?.ToLowerInvariant() == "desc"
-                ? query.OrderByDescending(t => t.StartDate)
-                : query.OrderBy(t => t.StartDate);
-
-            return query.ToList();
+            query = query.Where(t => t.Status == TripStatus.Delayed || t.Status == TripStatus.OffRoute);
         }
+
+        query = order?.ToLowerInvariant() == "desc"
+            ? query.OrderByDescending(t => t.StartDate)
+            : query.OrderBy(t => t.StartDate);
+
+        return query.ToList();
     }
 
     public IEnumerable<object> GetTripSnapshots(string order = "asc", string? criticalFilter = null)
     {
         var trips = GetTrips(order, criticalFilter);
         return trips.Select(ToSnapshot).ToList();
-    }
-
-    /// <summary>
-    /// Applies a round of simulated telemetry updates and returns the changed trip snapshots.
-    /// This keeps payloads small for SignalR clients that only need the data deltas.
-    /// </summary>
-    public IEnumerable<object> ApplySimulationTick(int maxChanges = 20)
-    {
-        var updates = new List<Trip>();
-
-        lock (_sync)
-        {
-            foreach (var trip in _trips)
-            {
-                if (updates.Count >= maxChanges)
-                {
-                    break;
-                }
-
-                var changed = MutateTrip(trip);
-                if (changed)
-                {
-                    updates.Add(trip);
-                }
-            }
-        }
-
-        return updates.Select(ToSnapshot).ToList();
     }
 
     public string SerializeTrips(IEnumerable<Trip> trips)
@@ -103,47 +73,38 @@ public class TripService
         status = trip.Status.ToString()
     };
 
-    private bool MutateTrip(Trip trip)
+    private void ApplyLiveMutations()
     {
-        var changed = false;
-
-        if (_random.NextDouble() < 0.25)
+        foreach (var trip in _trips)
         {
-            var statusRoll = _random.Next(0, 100);
-            var newStatus = statusRoll switch
+            if (_random.NextDouble() < 0.15)
             {
-                < 70 => TripStatus.OnTime,
-                < 90 => TripStatus.Delayed,
-                _ => TripStatus.OffRoute
-            };
-
-            if (newStatus != trip.Status)
-            {
-                trip.Status = newStatus;
-                changed = true;
+                var statusRoll = _random.Next(0, 100);
+                trip.Status = statusRoll switch
+                {
+                    < 70 => TripStatus.OnTime,
+                    < 90 => TripStatus.Delayed,
+                    _ => TripStatus.OffRoute
+                };
             }
-        }
 
-        if (_random.NextDouble() < 0.35)
-        {
-            var nextStop = trip.Timeline.FirstOrDefault(stop => !stop.IsComplete);
-            if (nextStop is not null)
-            {
-                nextStop.IsComplete = true;
-                changed = true;
-            }
-        }
-
-        foreach (var probill in trip.Probills)
-        {
             if (_random.NextDouble() < 0.25)
             {
-                probill.StopArrival = DateTime.UtcNow.AddMinutes(_random.Next(-120, 180));
-                changed = true;
+                var nextStop = trip.Timeline.FirstOrDefault(stop => !stop.IsComplete);
+                if (nextStop is not null)
+                {
+                    nextStop.IsComplete = true;
+                }
+            }
+
+            foreach (var probill in trip.Probills)
+            {
+                if (_random.NextDouble() < 0.2)
+                {
+                    probill.StopArrival = DateTime.UtcNow.AddMinutes(_random.Next(-120, 180));
+                }
             }
         }
-
-        return changed;
     }
 
     private List<Trip> BuildSeedTrips()

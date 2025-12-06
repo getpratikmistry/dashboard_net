@@ -6,8 +6,7 @@
     };
 
     const cardUpdateHandles = new Map();
-    const updateIntervalMs = 10000;
-    let connection;
+    const updateIntervalMs = 5000;
 
     function updateTextIfChanged($el, value) {
         const textValue = value ?? '';
@@ -19,17 +18,29 @@
     }
 
     function renderTimeline($container, stops) {
-        $container.empty();
-        const fragment = $(document.createDocumentFragment());
-        stops.forEach(stop => fragment.append(buildStop(stop)));
-        $container.append(fragment);
+        const existing = $container.find('.timeline-stop');
+        if (existing.length !== stops.length) {
+            $container.empty();
+            stops.forEach(stop => {
+                $container.append(buildStop(stop));
+            });
+            return;
+        }
+
+        existing.each(function (index) {
+            const stop = stops[index];
+            const $stop = $(this);
+            $stop.toggleClass('complete', !!stop.isComplete);
+            updateTextIfChanged($stop.find('.fw-semibold'), stop.name);
+            updateTextIfChanged($stop.find('.text-muted'), stop.arrivesAt);
+        });
     }
 
     function buildStop(stop) {
         return $(
             `<div class="timeline-stop ${stop.isComplete ? 'complete' : ''}">` +
             '  <div class="dot"></div>' +
-            '  <div class="timeline-label">' +
+            '  <div>' +
             `    <div class="fw-semibold">${stop.name}</div>` +
             `    <div class="small text-muted">${stop.arrivesAt}</div>` +
             '  </div>' +
@@ -215,35 +226,12 @@
         rebuildCards(trips);
     }
 
-    function connectSignalR() {
-        if (!window.signalR) {
-            return;
-        }
-
-        connection = new signalR.HubConnectionBuilder()
-            .withUrl('/tripHub')
-            .withAutomaticReconnect()
-            .build();
-
-        connection.on('TripsUpdated', (payload) => {
-            if (Array.isArray(payload)) {
-                applyUpdate(payload);
-            }
-        });
-
-        connection.start()
-            .catch(() => {
-                // keep silent, the polling loop will continue to work
-            });
-    }
-
     $(function () {
         hydrateFromServer();
         scheduleUpdates();
-        connectSignalR();
 
         $('#orderSelect, #criticalSwitch').on('change', () => {
-            fetchTrips().done(rebuildCards);
+            fetchTrips().done(applyUpdate);
         });
     });
 }(jQuery));
