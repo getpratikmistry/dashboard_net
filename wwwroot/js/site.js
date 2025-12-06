@@ -6,8 +6,8 @@
     };
 
     const cardUpdateHandles = new Map();
-    const updateIntervalMs = 10000;
     let connection;
+    const updateIntervalMs = 5000;
 
     function updateTextIfChanged($el, value) {
         const textValue = value ?? '';
@@ -23,6 +23,22 @@
         const fragment = $(document.createDocumentFragment());
         stops.forEach(stop => fragment.append(buildStop(stop)));
         $container.append(fragment);
+        const existing = $container.find('.timeline-stop');
+        if (existing.length !== stops.length) {
+            $container.empty();
+            stops.forEach(stop => {
+                $container.append(buildStop(stop));
+            });
+            return;
+        }
+
+        existing.each(function (index) {
+            const stop = stops[index];
+            const $stop = $(this);
+            $stop.toggleClass('complete', !!stop.isComplete);
+            updateTextIfChanged($stop.find('.fw-semibold'), stop.name);
+            updateTextIfChanged($stop.find('.text-muted'), stop.arrivesAt);
+        });
     }
 
     function buildStop(stop) {
@@ -30,6 +46,7 @@
             `<div class="timeline-stop ${stop.isComplete ? 'complete' : ''}">` +
             '  <div class="dot"></div>' +
             '  <div class="timeline-label">' +
+            '  <div>' +
             `    <div class="fw-semibold">${stop.name}</div>` +
             `    <div class="small text-muted">${stop.arrivesAt}</div>` +
             '  </div>' +
@@ -174,6 +191,7 @@
     }
 
     function applyUpdate(trips, { isFullList = false } = {}) {
+    function applyUpdate(trips) {
         const cards = new Map();
         $('.trip-card').each(function () {
             cards.set($(this).data('trip-id'), $(this));
@@ -214,6 +232,26 @@
                 return;
             }
 
+        let structureChanged = trips.length !== cards.size;
+        if (!structureChanged) {
+            for (const trip of trips) {
+                if (!cards.has(trip.id)) {
+                    structureChanged = true;
+                    break;
+                }
+            }
+        }
+
+        if (structureChanged) {
+            rebuildCards(trips);
+            return;
+        }
+
+        trips.forEach(trip => {
+            const $card = cards.get(trip.id);
+            if (!$card || cardUpdateHandles.has(trip.id)) {
+                return;
+            }
             renderCardContent($card, trip);
         });
     }
@@ -221,6 +259,7 @@
     function scheduleUpdates() {
         setInterval(() => {
             fetchTrips().done(trips => applyUpdate(trips, { isFullList: true }));
+            fetchTrips().done(applyUpdate);
         }, updateIntervalMs);
     }
 
@@ -259,6 +298,12 @@
 
         $('#orderSelect, #criticalSwitch').on('change', () => {
             fetchTrips().done(rebuildCards);
+    $(function () {
+        hydrateFromServer();
+        scheduleUpdates();
+
+        $('#orderSelect, #criticalSwitch').on('change', () => {
+            fetchTrips().done(applyUpdate);
         });
     });
 }(jQuery));
