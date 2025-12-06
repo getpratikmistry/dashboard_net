@@ -231,7 +231,7 @@
         scheduleUpdates();
 
         $('#orderSelect, #criticalSwitch').on('change', () => {
-            fetchTrips().done(rebuildCards);
+            fetchTrips().done(applyUpdate);
         });
     });
 }(jQuery));
