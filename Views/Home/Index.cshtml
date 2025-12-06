@@ -1,0 +1,123 @@
+@model IEnumerable<DashboardNet.Models.Trip>
+@{
+    var initialTripsJson = ViewData["InitialTripsJson"]?.ToString() ?? "[]";
+}
+
+<div class="d-flex flex-column gap-3 mb-4">
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <div>
+            <label for="orderSelect" class="form-label mb-1 small text-muted">Order by start</label>
+            <select id="orderSelect" class="form-select form-select-sm shadow-sm">
+                <option value="asc" selected>Earliest first</option>
+                <option value="desc">Latest first</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label mb-1 small text-muted">Critical only</label>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="criticalSwitch">
+                <label class="form-check-label" for="criticalSwitch">Delayed or off-route</label>
+            </div>
+        </div>
+        <div class="ms-auto d-flex align-items-center gap-2">
+            <span class="badge bg-success-subtle text-success">On-time</span>
+            <span class="badge bg-warning-subtle text-dark">Delayed</span>
+            <span class="badge bg-danger-subtle text-danger">Off-route</span>
+        </div>
+    </div>
+    <div class="alert alert-info d-flex align-items-center gap-2 shadow-sm small mb-0">
+        <span class="badge bg-primary">Live</span>
+        <div>Micro-updates every few seconds without refreshing the page. Hover a card to pause its updates.</div>
+    </div>
+</div>
+
+<div id="trip-grid" class="d-flex flex-column gap-3" data-initial-trips='@Html.Raw(initialTripsJson)'>
+    @foreach (var trip in Model)
+    {
+        <div class="card trip-card shadow-sm" data-trip-id="@trip.Id">
+            <div class="card-header bg-white border-0 d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="text-muted small">Trip window</div>
+                    <div class="fw-semibold">@trip.StartDate:yyyy-MM-dd HH:mm - @trip.EndDate:yyyy-MM-dd HH:mm</div>
+                </div>
+                <span class="badge status-badge @GetStatusClass(trip.Status)" data-section="status">@trip.Status</span>
+            </div>
+            <div class="card-body pt-0">
+                <div class="row g-4">
+                    <div class="col-12 col-lg-4">
+                        <div class="trip-meta" data-section="meta">
+                            <div class="d-flex align-items-center mb-2">
+                                <div class="circle-icon bg-primary-subtle text-primary me-2">🚚</div>
+                                <div>
+                                    <div class="text-muted small">Truck</div>
+                                    <div class="fw-semibold" data-field="truck">@trip.TruckUnit</div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center mb-2">
+                                <div class="circle-icon bg-info-subtle text-info me-2">👤</div>
+                                <div>
+                                    <div class="text-muted small">Driver</div>
+                                    <div class="fw-semibold" data-field="driver">@trip.DriverName</div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center mb-2">
+                                <div class="circle-icon bg-secondary-subtle text-secondary me-2">🛞</div>
+                                <div>
+                                    <div class="text-muted small">Trailers</div>
+                                    <div class="fw-semibold" data-field="trailers">@string.Join(", ", trip.Trailers.Select(t => t.UnitNumber))</div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <div class="circle-icon bg-warning-subtle text-warning me-2">🏢</div>
+                                <div>
+                                    <div class="text-muted small">Customers</div>
+                                    <div class="fw-semibold" data-field="customers">@string.Join(" • ", trip.Customers.Select(c => c.Name))</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-5">
+                        <div class="probill" data-section="probills">
+                            <div class="text-muted small mb-2">Probills</div>
+                            <div class="probill-list">
+                                @foreach (var probill in trip.Probills)
+                                {
+                                    <div class="probill-chip" data-probill="@probill.Number">
+                                        <div class="fw-semibold">@probill.Number</div>
+                                        <div class="small text-muted">@probill.PickupLocation → @probill.DeliveryLocation</div>
+                                        <div class="small arrival" data-field="arrival">@probill.StopArrival?.ToString("MMM dd, HH:mm") ?? "Pending"</div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-3">
+                        <div class="text-muted small mb-2">Timeline</div>
+                        <div class="timeline" data-section="timeline">
+                            @foreach (var stop in trip.Timeline)
+                            {
+                                <div class="timeline-stop @(stop.IsComplete ? "complete" : "")">
+                                    <div class="dot"></div>
+                                    <div>
+                                        <div class="fw-semibold">@stop.Name</div>
+                                        <div class="small text-muted">@stop.ArrivesAt:MMM dd, HH:mm</div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@functions {
+    string GetStatusClass(TripStatus status) => status switch
+    {
+        TripStatus.OnTime => "bg-success-subtle text-success",
+        TripStatus.Delayed => "bg-warning-subtle text-dark",
+        TripStatus.OffRoute => "bg-danger-subtle text-danger",
+        _ => "bg-secondary-subtle"
+    };
+}
